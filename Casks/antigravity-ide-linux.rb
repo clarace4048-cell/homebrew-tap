@@ -1,20 +1,20 @@
 cask "antigravity-ide-linux" do
   arch arm: "arm", intel: "x64"
-  livecheck_arch = on_arch_conditional arm: "arm64", intel: "x64"
   os linux: "linux"
 
-  version "2.0.4,6381998290370560"
-  sha256 arm64_linux:  "30435204d14cdcd479b37fd9ae077425d7ab7bb90f99af2bc41638205e02fb37",
-         x86_64_linux: "66337d45f2472ce5e89f394e77aec74909aa1be0bb33c9f73299a95f458e6770"
+  version "2.6.0,5526304964083712"
+  sha256 arm:          "4953ccb52bf909582a1711a3dd26d640efb45fe555a17ebeff8bc7e2eaa052de",
+         intel:        "b060a7c7679103b2b619752f8ee7a3088dd241a7d207d4311974b56ea6f94356",
+         arm64_linux:  "4953ccb52bf909582a1711a3dd26d640efb45fe555a17ebeff8bc7e2eaa052de",
+         x86_64_linux: "b060a7c7679103b2b619752f8ee7a3088dd241a7d207d4311974b56ea6f94356"
 
-  url "https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/#{version.csv.first}-#{version.csv.second}/linux-#{arch}/Antigravity%20IDE.tar.gz",
-      verified: "edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/"
+  url "https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/#{version.csv.first}-#{version.csv.second}/linux-#{arch}/Antigravity%20IDE.tar.gz"
   name "Google Antigravity IDE"
   desc "AI Coding Agent IDE"
   homepage "https://antigravity.google/product/antigravity-ide"
 
   livecheck do
-    url "https://antigravity-ide-auto-updater-974169037036.us-central1.run.app/api/update/linux-#{livecheck_arch}/stable/latest"
+    url "https://antigravity-ide-auto-updater-974169037036.us-central1.run.app/api/update/linux-#{(arch == "arm") ? "arm64" : "x64"}/stable/latest"
     regex(%r{/stable/([^/]+)/}i)
     strategy :json do |json, regex|
       match = json["url"]&.match(regex)
@@ -35,26 +35,17 @@ cask "antigravity-ide-linux" do
   artifact "Antigravity IDE/resources/app/resources/linux/code.png",
            target: "#{Dir.home}/.local/share/icons/hicolor/512x512/apps/antigravity-ide.png"
 
-  preflight do
-    product_json = "#{staged_path}/Antigravity IDE/resources/app/product.json"
-    if File.exist?(product_json)
-      product = JSON.parse(File.read(product_json))
-      product.delete("updateUrl")
-      product["configurationDefaults"] ||= {}
-      product["configurationDefaults"]["update.mode"] = "none"
-      File.write(product_json, JSON.pretty_generate(product))
-    end
+  preflight_steps do
+    mkdir_p ".local/share/applications", base: :home
+    mkdir_p ".local/share/icons/hicolor/512x512/apps", base: :home
 
-    FileUtils.mkdir_p "#{Dir.home}/.local/share/applications"
-    FileUtils.mkdir_p "#{Dir.home}/.local/share/icons/hicolor/512x512/apps"
-
-    File.write("#{staged_path}/antigravity-ide.desktop", <<~EOS)
+    write_file "antigravity-ide.desktop", <<~EOS
       [Desktop Entry]
       Name=Antigravity IDE
       Comment=AI Coding Agent IDE
       GenericName=Text Editor
-      Exec="#{HOMEBREW_PREFIX}/bin/antigravity-ide" %F
-      Icon=#{Dir.home}/.local/share/icons/hicolor/512x512/apps/antigravity-ide.png
+      Exec="{{HOMEBREW_PREFIX}}/bin/antigravity-ide" %F
+      Icon=antigravity-ide
       Type=Application
       StartupNotify=false
       StartupWMClass=Antigravity IDE
@@ -65,17 +56,17 @@ cask "antigravity-ide-linux" do
 
       [Desktop Action new-empty-window]
       Name=New Empty Window
-      Exec="#{HOMEBREW_PREFIX}/bin/antigravity-ide" --new-window %F
-      Icon=#{Dir.home}/.local/share/icons/hicolor/512x512/apps/antigravity-ide.png
+      Exec="{{HOMEBREW_PREFIX}}/bin/antigravity-ide" --new-window %F
+      Icon=antigravity-ide
     EOS
 
-    File.write("#{staged_path}/antigravity-ide-url-handler.desktop", <<~EOS)
+    write_file "antigravity-ide-url-handler.desktop", <<~EOS
       [Desktop Entry]
       Name=Antigravity IDE - URL Handler
       Comment=AI Coding Agent IDE
       GenericName=Text Editor
-      Exec="#{HOMEBREW_PREFIX}/bin/antigravity-ide" --open-url "%U"
-      Icon=#{Dir.home}/.local/share/icons/hicolor/512x512/apps/antigravity-ide.png
+      Exec="{{HOMEBREW_PREFIX}}/bin/antigravity-ide" --open-url "%U"
+      Icon=antigravity-ide
       Type=Application
       NoDisplay=true
       Terminal=false

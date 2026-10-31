@@ -2,9 +2,11 @@ cask "vscodium-linux" do
   arch arm: "arm64", intel: "x64"
   os linux: "linux"
 
-  version "1.121.03429"
-  sha256 arm64_linux:  "993e5dbf0f06399d069d968a452fd30334031046033a0723eb0ea534bcb9910d",
-         x86_64_linux: "2c9b06735d4c1face570935f4968d358f9f6269f5d9237813d0b825c7d70a143"
+  version "1.143.17232"
+  sha256 arm:          "9f270ae242561812acd02be9cf5c13c848da359b356327adfe44b815a9532309",
+         intel:        "ca1895aa040bd91a09c709d79eac7862d8c1aa0237fdc25b503deeb8bcd87efd",
+         arm64_linux:  "9f270ae242561812acd02be9cf5c13c848da359b356327adfe44b815a9532309",
+         x86_64_linux: "ca1895aa040bd91a09c709d79eac7862d8c1aa0237fdc25b503deeb8bcd87efd"
 
   url "https://github.com/VSCodium/vscodium/releases/download/#{version}/VSCodium-linux-#{arch}-#{version}.tar.gz"
   name "VSCodium"
@@ -15,6 +17,8 @@ cask "vscodium-linux" do
     url :url
     strategy :github_latest
   end
+
+  depends_on formula: "jq"
 
   binary "bin/codium"
   binary "bin/codium-tunnel"
@@ -27,26 +31,24 @@ cask "vscodium-linux" do
   artifact "resources/app/resources/linux/code.png",
            target: "#{Dir.home}/.local/share/icons/vscodium.png"
 
-  preflight do
-    # Disable VSCodium's built-in update checks; Homebrew manages this install.
-    product_json = "#{staged_path}/resources/app/product.json"
-    if File.exist?(product_json)
-      product = JSON.parse(File.read(product_json))
-      product.delete("updateUrl")
-      product["configurationDefaults"] ||= {}
-      product["configurationDefaults"]["update.mode"] = "none"
-      File.write(product_json, JSON.pretty_generate(product))
+  preflight_steps do
+    if_path_exists "resources/app/product.json" do
+      run "{{HOMEBREW_PREFIX}}/bin/jq",
+          args:        ["del(.updateUrl) | .configurationDefaults[\"update.mode\"] = \"none\"",
+                        "{{staged_path}}/resources/app/product.json"],
+          stdout_path: "product.json"
+      move "product.json", "resources/app/product.json"
     end
 
-    FileUtils.mkdir_p("#{Dir.home}/.local/share/applications")
-    FileUtils.mkdir_p("#{Dir.home}/.local/share/icons")
+    mkdir_p ".local/share/applications", base: :home
+    mkdir_p ".local/share/icons", base: :home
 
-    File.write("#{staged_path}/codium.desktop", <<~EOS)
+    write_file "codium.desktop", <<~EOS
       [Desktop Entry]
       Name=VSCodium
       Comment=Code Editing. Redefined.
       GenericName=Text Editor
-      Exec=#{HOMEBREW_PREFIX}/bin/codium %F
+      Exec={{HOMEBREW_PREFIX}}/bin/codium %F
       Icon=vscodium
       Type=Application
       StartupNotify=false
@@ -67,15 +69,15 @@ cask "vscodium-linux" do
       Name[ru]=Новое пустое окно
       Name[zh_CN]=新建空窗口
       Name[zh_TW]=開新空視窗
-      Exec=#{HOMEBREW_PREFIX}/bin/codium --new-window %F
+      Exec={{HOMEBREW_PREFIX}}/bin/codium --new-window %F
       Icon=vscodium
     EOS
-    File.write("#{staged_path}/codium-url-handler.desktop", <<~EOS)
+    write_file "codium-url-handler.desktop", <<~EOS
       [Desktop Entry]
       Name=VSCodium - URL Handler
       Comment=Code Editing. Redefined.
       GenericName=Text Editor
-      Exec=#{HOMEBREW_PREFIX}/bin/codium --open-url %U
+      Exec={{HOMEBREW_PREFIX}}/bin/codium --open-url %U
       Icon=vscodium
       Type=Application
       NoDisplay=true

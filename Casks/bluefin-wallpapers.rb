@@ -1,7 +1,28 @@
 cask "bluefin-wallpapers" do
   os macos: "darwin", linux: "linux"
 
-  version "2026-04-13"
+  version "2026-10-12"
+
+  on_macos do
+    sha256 "afafb174f8d16b374ed1bf467b0c688f2e27fd49c44c5e4aba743c36b2b5fa1a"
+
+    url "https://github.com/ublue-os/artwork/releases/download/bluefin-v#{version}/bluefin-wallpapers-macos.tar.zstd"
+  end
+  on_linux do
+    if File.exist?("/usr/bin/plasmashell")
+      url "https://github.com/ublue-os/artwork/releases/download/bluefin-v#{version}/bluefin-wallpapers-kde.tar.zstd"
+      sha256 "07fd86ac83115ab413cc7334d31112ce16ab4c3d51e3199c39dac7246012cc47"
+
+    elsif File.exist?("/usr/bin/gnome-shell") || File.exist?("/usr/bin/mutter")
+      url "https://github.com/ublue-os/artwork/releases/download/bluefin-v#{version}/bluefin-wallpapers-gnome.tar.zstd"
+      sha256 "c6cd3fb5c6f14472b0ced070d2d9f5ac374197305feb81ab4026cae22d2d1eb5"
+
+    else
+      url "https://github.com/ublue-os/artwork/releases/download/bluefin-v#{version}/bluefin-wallpapers-png.tar.zstd"
+      sha256 "28617c0843753c26a98adf08c1b2f9779a7ce397d1d9beee1ed115b82d409cfa"
+
+    end
+  end
 
   name "bluefin-wallpapers"
   desc "Wallpapers for Bluefin"
@@ -13,67 +34,63 @@ cask "bluefin-wallpapers" do
     strategy :github_releases
   end
 
-  on_macos do
-    url "https://github.com/ublue-os/artwork/releases/download/bluefin-v#{version}/bluefin-wallpapers-macos.tar.zstd"
-    sha256 "7d067bd998717e318aff98732cc3f35e6909d59e8191543962dc72bd8ba9fc80"
-
-    Dir.glob("#{staged_path}/*").each do |file|
-      artifact file, target: "#{Dir.home}/Library/Desktop Pictures/Bluefin/#{File.basename(file)}"
+  preflight_steps do
+    on_linux do
+      symlink ".", ".user-home", source_base: :home, overwrite: true
+      run "/bin/sh", args: ["-eu", "-c", <<~'SH'], chdir: "{{staged_path}}"
+        WALLPAPER_HOME=$(readlink .user-home)
+        replacement=$(printf '%s' "$WALLPAPER_HOME" | sed 's/[\\&|]/\\&/g')
+        find . -type f -name '*.xml' -exec sed -i.brew-home-backup "s|~|$replacement|g" {} +
+        find . -type f -name '*.xml.brew-home-backup' -delete
+      SH
     end
   end
 
-  on_linux do
-    destination_dir = "#{Dir.home}/.local/share/backgrounds/bluefin"
-    kde_destination_dir = "#{Dir.home}/.local/share/wallpapers/bluefin"
-
-    if File.exist?("/usr/bin/plasmashell")
-      url "https://github.com/ublue-os/artwork/releases/download/bluefin-v#{version}/bluefin-wallpapers-kde.tar.zstd"
-      sha256 "efbeeae6b04043a086088f71ec1dad0e63ba1c56fae440d69a9b459b03b5ffc1"
-
-      Dir.glob("#{staged_path}/*").each do |file|
-        artifact file, target: "#{kde_destination_dir}/#{File.basename(file)}"
-      end
-    elsif File.exist?("/usr/bin/gnome-shell") || File.exist?("/usr/bin/mutter")
-      url "https://github.com/ublue-os/artwork/releases/download/bluefin-v#{version}/bluefin-wallpapers-gnome.tar.zstd"
-      sha256 "87fdc6505da615e5df902df408371d5ab34efef6199144925324a564e6801e00"
-
-      Dir.glob("#{staged_path}/*").select { |f| File.file?(f) }.each do |file|
-        artifact file, target: "#{destination_dir}/#{File.basename(file)}"
-      end
-
-      Dir.glob("#{staged_path}/gnome-background-properties/*").each do |file|
-        artifact file, target: "#{Dir.home}/.local/share/gnome-background-properties/#{File.basename(file)}"
-      end
-    else
-      url "https://github.com/ublue-os/artwork/releases/download/bluefin-v#{version}/bluefin-wallpapers-png.tar.zstd"
-      sha256 "15ea697d0cf97aabe5d9aaac5585104ff0dfea8690c10b37e8f888b771019065"
-
-      Dir.glob("#{staged_path}/*").each do |file|
-        artifact file, target: "#{destination_dir}/#{File.basename(file)}"
-      end
+  postflight_steps do
+    on_macos do
+      mkdir_p "Library/Desktop Pictures/Bluefin", base: :home
+      symlink "*", "Library/Desktop Pictures/Bluefin", target_base: :home, source_glob: true, overwrite: true
+    end
+    on_linux do
+      mkdir_p ".local/share/backgrounds/bluefin", base: :home
+      mkdir_p ".local/share/wallpapers/bluefin", base: :home
+      mkdir_p ".local/share/gnome-background-properties", base: :home
+      run "/bin/bash", chdir: "{{staged_path}}",
+                       env: { "WALLPAPER_HOME" => "{{staged_path}}/.user-home" },
+                       writable_paths: [".local/share/backgrounds/bluefin", ".local/share/wallpapers/bluefin",
+                                        ".local/share/gnome-background-properties"], writable_base: :home,
+                       args: ["-eu", "-c", <<~SH]
+                         shopt -s nullglob
+                         destination="$WALLPAPER_HOME/.local/share/backgrounds/bluefin"
+                         if [ -e /usr/bin/plasmashell ]; then
+                           destination="$WALLPAPER_HOME/.local/share/wallpapers/bluefin"
+                           for file in "$PWD"/*; do ln -sfn "$file" "$destination/$(basename "$file")"; done
+                         elif [ -e /usr/bin/gnome-shell ] || [ -e /usr/bin/mutter ]; then
+                           for file in "$PWD"/*; do
+                             if [ -f "$file" ]; then ln -sfn "$file" "$destination/$(basename "$file")"; fi
+                           done
+                           for file in "$PWD"/gnome-background-properties/*; do
+                             ln -sfn "$file" "$WALLPAPER_HOME/.local/share/gnome-background-properties/$(basename "$file")"
+                           done
+                         else
+                           for file in "$PWD"/*; do ln -sfn "$file" "$destination/$(basename "$file")"; done
+                         fi
+                       SH
     end
   end
 
-  preflight do
-    FileUtils.mkdir_p "#{Dir.home}/Library/Desktop Pictures/Bluefin" if OS.mac?
-
-    if OS.linux?
-      FileUtils.mkdir_p "#{Dir.home}/.local/share/backgrounds/bluefin"
-      FileUtils.mkdir_p "#{Dir.home}/.local/share/wallpapers/bluefin"
-      FileUtils.mkdir_p "#{Dir.home}/.local/share/gnome-background-properties"
-
-      Dir.glob("#{staged_path}/**/*.xml").each do |file|
-        contents = File.read(file)
-        contents.gsub!("~", Dir.home)
-        File.write(file, contents)
-      end
+  uninstall_postflight_steps do
+    on_macos do
+      remove "Library/Desktop Pictures/Bluefin/*", base: :home, symlink_target_contains: "/bluefin-wallpapers/"
+    end
+    on_linux do
+      remove [".local/share/backgrounds/bluefin/**/*", ".local/share/wallpapers/bluefin/**/*",
+              ".local/share/gnome-background-properties/*.xml"],
+             base: :home, symlink_target_contains: "/bluefin-wallpapers/"
     end
   end
 
-  postflight do
-    if OS.mac?
-      puts "Wallpapers installed to: #{Dir.home}/Library/Desktop Pictures/Bluefin"
-      puts "To use: System Settings > Wallpaper > Add Folder"
-    end
-  end
+  caveats <<~EOS
+    On macOS, add ~/Library/Desktop Pictures/Bluefin in System Settings > Wallpaper > Add Folder.
+  EOS
 end

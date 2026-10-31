@@ -1,30 +1,32 @@
 cask "antigravity-linux" do
   arch arm: "arm", intel: "x64"
-  livecheck_arch = on_arch_conditional arm: "arm64", intel: "x64"
   os linux: "linux"
 
-  version "2.0.6,5413878570549248"
-  sha256 arm64_linux:  "02fc7f47650582ac72b845853b514de6c83ea7a4cd8a8d739e1a8688db2f45a9",
-         x86_64_linux: "ad1e04535149b07c27030eb1ead40f4efda388cb39020bcbb9accdfb49e44cc5"
+  version "2.28.1,6709500728705024"
+  sha256 arm:          "f1e2274a3501fd90eeec0bd74f6bc27a3ee98dfb5dd1095ba8ec4ba59bceed7f",
+         intel:        "15b15578e432ea432e7fc90ac62e140a844eeb295653af72aa5fd5a36494def7",
+         arm64_linux:  "f1e2274a3501fd90eeec0bd74f6bc27a3ee98dfb5dd1095ba8ec4ba59bceed7f",
+         x86_64_linux: "15b15578e432ea432e7fc90ac62e140a844eeb295653af72aa5fd5a36494def7"
 
-  url "https://storage.googleapis.com/antigravity-public/antigravity-hub/#{version.csv.first}-#{version.csv.second}/linux-#{arch}/Antigravity.tar.gz",
-      verified: "storage.googleapis.com/antigravity-public/antigravity-hub/"
+  url "https://storage.googleapis.com/antigravity-public/antigravity-hub/#{version.csv.first}-#{version.csv.second}/linux-#{arch}/Antigravity.tar.gz"
   name "Google Antigravity"
   desc "Agent orchestration platform"
   homepage "https://antigravity.google/product/antigravity-2"
 
   livecheck do
-    url "https://antigravity-auto-updater-974169037036.us-central1.run.app/api/update/linux-#{livecheck_arch}/stable/latest"
-    regex(%r{/antigravity-hub/([^/]+)/}i)
-    strategy :json do |json, regex|
-      match = json["url"]&.match(regex)
+    url "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-x64-linux.yml"
+    regex(%r{/antigravity-hub/(\d+(?:\.\d+)+)-(\d+)/}i)
+    strategy :page_match do |page, regex|
+      match = page.match(regex)
       next if match.blank?
 
-      match[1]&.tr("-", ",").to_s
+      "#{match[1]},#{match[2]}"
     end
   end
 
-  binary "#{staged_path}/Antigravity-#{arch}/antigravity"
+  depends_on formula: "jq"
+
+  binary "Antigravity/antigravity"
   artifact "antigravity.desktop",
            target: "#{Dir.home}/.local/share/applications/antigravity.desktop"
   artifact "antigravity-url-handler.desktop",
@@ -32,40 +34,43 @@ cask "antigravity-linux" do
   artifact "antigravity.png",
            target: "#{Dir.home}/.local/share/icons/hicolor/512x512/apps/antigravity.png"
 
-  preflight do
-    app_root = "#{staged_path}/Antigravity-#{arch}"
-    app_update_yml = "#{app_root}/resources/app-update.yml"
-    asar_path = "#{app_root}/resources/app.asar"
-
-    FileUtils.mkdir_p "#{Dir.home}/.local/share/applications"
-    FileUtils.mkdir_p "#{Dir.home}/.local/share/icons/hicolor/512x512/apps"
-
-    # Disable Electron auto-update checks; Homebrew manages this install.
-    FileUtils.rm app_update_yml
-
-    # Extract the app icon from the ASAR package without requiring external tools.
-    if File.exist?(asar_path)
-      File.open(asar_path, "rb") do |asar|
-        asar.seek(8)
-        header_size = asar.read(4).unpack1("V") - 4
-        asar.seek(16)
-        header = JSON.parse(asar.read(header_size))
-        icon_entry = header.dig("files", "icon.png")
-
-        if icon_entry
-          asar.seek(16 + header_size + icon_entry["offset"].to_i)
-          File.binwrite("#{staged_path}/antigravity.png", asar.read(icon_entry["size"]))
-        end
-      end
+  preflight_steps do
+    unless_path_exists "Antigravity" do
+      move "Antigravity-*", "Antigravity", source_glob: true
     end
+    mkdir_p ".local/share/applications", base: :home
+    mkdir_p ".local/share/icons/hicolor/512x512/apps", base: :home
 
-    File.write("#{staged_path}/antigravity.desktop", <<~EOS)
+    # Keep file preparation inside run: sandbox path setup must not create the
+    # destination directory before the payload move runs.
+    # ASAR uses little-endian 32-bit pickle lengths on both supported Linux CPUs.
+    run "/bin/bash", chdir: "{{staged_path}}", env: { "JQ" => "{{HOMEBREW_PREFIX}}/bin/jq" },
+                     args: ["-euo", "pipefail", "-c", <<~'SH']
+                       rm -f Antigravity/resources/app-update.yml
+
+                       asar=Antigravity/resources/app.asar
+                       if [ -f "$asar" ]; then
+                         header_size=$(od -An -tu4 -j4 -N4 "$asar" | tr -d '[:space:]')
+                         json_size=$(od -An -tu4 -j12 -N4 "$asar" | tr -d '[:space:]')
+                         dd if="$asar" of=asar-header.json bs=64K iflag=skip_bytes,count_bytes skip=16 count="$json_size" status=none
+                         if "$JQ" -e '.files["icon.png"] != null' asar-header.json >/dev/null; then
+                           offset=$("$JQ" -er '.files["icon.png"].offset | tonumber' asar-header.json)
+                           size=$("$JQ" -er '.files["icon.png"].size' asar-header.json)
+                           [[ "$offset" =~ ^[0-9]+$ && "$size" =~ ^[0-9]+$ ]]
+                           dd if="$asar" of=antigravity.png bs=64K iflag=skip_bytes,count_bytes \
+                             skip="$((8 + header_size + offset))" count="$size" status=none
+                         fi
+                         rm -f asar-header.json
+                       fi
+                     SH
+
+    write_file "antigravity.desktop", <<~EOS
       [Desktop Entry]
       Name=Antigravity
       Comment=Agent orchestration platform
       GenericName=AI Agent Platform
-      Exec="#{HOMEBREW_PREFIX}/bin/antigravity" %F
-      Icon=#{Dir.home}/.local/share/icons/hicolor/512x512/apps/antigravity.png
+      Exec="{{HOMEBREW_PREFIX}}/bin/antigravity" %F
+      Icon=antigravity
       Type=Application
       StartupNotify=false
       StartupWMClass=Antigravity
@@ -73,13 +78,13 @@ cask "antigravity-linux" do
       Keywords=antigravity;agent;ai;
     EOS
 
-    File.write("#{staged_path}/antigravity-url-handler.desktop", <<~EOS)
+    write_file "antigravity-url-handler.desktop", <<~EOS
       [Desktop Entry]
       Name=Antigravity - URL Handler
       Comment=Agent orchestration platform
       GenericName=AI Agent Platform
-      Exec="#{HOMEBREW_PREFIX}/bin/antigravity" "%U"
-      Icon=#{Dir.home}/.local/share/icons/hicolor/512x512/apps/antigravity.png
+      Exec="{{HOMEBREW_PREFIX}}/bin/antigravity" "%U"
+      Icon=antigravity
       Type=Application
       NoDisplay=true
       Terminal=false
@@ -91,7 +96,9 @@ cask "antigravity-linux" do
     EOS
 
     # Create a placeholder icon if extraction fails
-    FileUtils.touch "#{staged_path}/antigravity.png" unless File.exist?("#{staged_path}/antigravity.png")
+    unless_path_exists "antigravity.png" do
+      touch "antigravity.png"
+    end
   end
 
   zap trash: [
